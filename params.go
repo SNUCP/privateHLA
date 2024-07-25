@@ -8,54 +8,54 @@ import (
 
 var (
 	// FloatParamsLiteral is the parameters for floating-point operations.
-	// It has much lower failure rate. (Around 2^-20).
+	// It has much lower failure rate. (Around 2^-16).
 	FloatParamsLiteral = tfhe.ParametersLiteral[uint64]{
-		LWEDimension:    935,
+		LWEDimension:    978,
 		GLWEDimension:   1,
 		PolyDegree:      2048,
-		PolyLargeDegree: 4096,
+		LookUpTableSize: 4096,
 
-		LWEStdDev:  0.000000277202526552345,
-		GLWEStdDev: 0.00000000000000029403601535432533,
+		LWEStdDev:  0.00000010240471256147537,
+		GLWEStdDev: 0.00000000000000037036182440289164,
 
-		BlockSize: 5,
+		BlockSize: 6,
 
 		MessageModulus: 1 << 7,
 
 		BootstrapParameters: tfhe.GadgetParametersLiteral[uint64]{
-			Base:  1 << 23,
+			Base:  1 << 22,
 			Level: 1,
 		},
 		KeySwitchParameters: tfhe.GadgetParametersLiteral[uint64]{
-			Base:  1 << 4,
-			Level: 5,
+			Base:  1 << 6,
+			Level: 3,
 		},
 
 		BootstrapOrder: tfhe.OrderKeySwitchBlindRotate,
 	}
 
 	// IntParamsLiteral is the parameters for integer operations.
-	// This has standard failure rate, around 2^-40.
+	// This has standard failure rate, around 2^-60.
 	IntParamsLiteral = tfhe.ParametersLiteral[uint64]{
-		LWEDimension:    935,
+		LWEDimension:    978,
 		GLWEDimension:   1,
 		PolyDegree:      2048,
-		PolyLargeDegree: 2048,
+		LookUpTableSize: 2048,
 
-		LWEStdDev:  0.000000277202526552345,
-		GLWEStdDev: 0.00000000000000029403601535432533,
+		LWEStdDev:  0.00000010240471256147537,
+		GLWEStdDev: 0.00000000000000037036182440289164,
 
-		BlockSize: 5,
+		BlockSize: 6,
 
 		MessageModulus: 1 << 5,
 
 		BootstrapParameters: tfhe.GadgetParametersLiteral[uint64]{
-			Base:  1 << 23,
+			Base:  1 << 22,
 			Level: 1,
 		},
 		KeySwitchParameters: tfhe.GadgetParametersLiteral[uint64]{
-			Base:  1 << 4,
-			Level: 5,
+			Base:  1 << 6,
+			Level: 3,
 		},
 
 		BootstrapOrder: tfhe.OrderKeySwitchBlindRotate,

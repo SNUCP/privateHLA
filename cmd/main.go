@@ -2,6 +2,7 @@ package main
 
 import (
 	"cmp"
+	"flag"
 	"fmt"
 	"hla"
 	"math"
@@ -21,9 +22,11 @@ func sigmoid(x float64) float64 {
 }
 
 func main() {
-	prefix := "B"
+	var prefix string
+	flag.StringVar(&prefix, "prefix", "", "HLA prefix")
+	flag.Parse()
 
-	cnt := 0
+	cnt := 0.0
 	predictions := make(map[string][]PredictionResult)
 	predictionsFinal := make(map[string][2]PredictionResult)
 	for _, id := range hla.HLAData.ID {
@@ -60,8 +63,13 @@ func main() {
 			{Allele: allele1, Pred: pred1},
 		}
 
-		if allele0 == hla.HLAData.Predictions[id][prefix][0] && allele1 == hla.HLAData.Predictions[id][prefix][1] {
-			cnt++
+		allele0Real := hla.HLAData.Predictions[id][prefix][0]
+		allele1Real := hla.HLAData.Predictions[id][prefix][1]
+
+		if (allele0 == allele0Real && allele1 == allele1Real) || (allele0 == allele1Real && allele1 == allele0Real) {
+			cnt += 1
+		} else if (allele0 == allele0Real || allele1 == allele1Real) || (allele0 == allele1Real || allele1 == allele0Real) {
+			cnt += 0.5
 		}
 	}
 
@@ -71,8 +79,9 @@ func main() {
 	evk := client.Encryptor.GenEvaluationKeyParallel()
 
 	server := hla.NewServer(prefix, evk)
+	server.Encryptor = client.Encryptor
 
-	cnt = 0
+	cnt = 0.0
 	var elapsed time.Duration
 	for i, id := range hla.HLAData.ID {
 		fmt.Printf("Test %v of %v\n", i+1, len(hla.HLAData.ID))
@@ -123,9 +132,12 @@ func main() {
 		fmt.Println("Encrypted :", allele0, allele1)
 		fmt.Println("Real      :", allele0Real, allele1Real)
 
-		if allele0 == allele0Real && allele1 == allele1Real {
+		if (allele0 == allele0Real && allele1 == allele1Real) || (allele0 == allele1Real && allele1 == allele0Real) {
 			fmt.Println("Correct :)")
 			cnt++
+		} else if (allele0 == allele0Real || allele1 == allele1Real) || (allele0 == allele1Real || allele1 == allele0Real) {
+			fmt.Println("Partially Correct :|")
+			cnt += 0.5
 		} else {
 			fmt.Println("Incorrect :(")
 			fmt.Println("Raw Data:")

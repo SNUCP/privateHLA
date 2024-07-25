@@ -13,6 +13,8 @@ import (
 type Server struct {
 	AllelePrefix string
 
+	Encryptor *tfhe.Encryptor[uint64]
+
 	// Parameters is a "default" parameter for floating-point operations.
 	Parameters tfhe.Parameters[uint64]
 	// IndexParameters is a parameter for indices of alleles.
@@ -98,8 +100,8 @@ func NewServer(allelePrefix string, evk tfhe.EvaluationKey[uint64]) *Server {
 	// Sign:
 	// We map sign(x).
 	signLUT := tfhe.NewLookUpTable(signParams)
-	for i := 0; i < signParams.PolyLargeDegree()/2; i++ {
-		signLUT.Coeffs[i] = 1 << 62
+	for i := 0; i < signParams.LookUpTableSize()/2; i++ {
+		signLUT.Value[i] = 1 << 62
 	}
 
 	// Mul:
@@ -208,7 +210,7 @@ func (s *Server) Predict(snips []tfhe.FourierGLWECiphertext[uint64]) ServerResul
 			s.Evaluator.FourierPolyMulAddFourierGLWEAssign(snips[j], s.Weights[i][j], ctProd)
 		}
 
-		preds[i] = s.Evaluator.SampleExtract(s.Evaluator.ToGLWECiphertext(ctProd), s.Parameters.PolyDegree()-1)
+		preds[i] = (s.Evaluator.ToGLWECiphertext(ctProd).ToLWECiphertext(s.Parameters.PolyDegree() - 1))
 	}
 
 	// Second step: Normalize the predictions.
@@ -250,10 +252,9 @@ func (s *Server) Predict(snips []tfhe.FourierGLWECiphertext[uint64]) ServerResul
 	s.ctTopIdx10.Value[0] = s.IndexEvaluator.EncodeLWE(1).Value
 	s.ctTopIdx11.Clear()
 
-	idxExceedsBound := len(preds) > int(s.IndexParameters.MessageModulus()) // If index exceeds the bound for IndexParams, use two ciphertexts
+	idxExceedsBound := len(preds) > int(s.IndexParameters.MessageModulus()/2) // If index exceeds the bound for IndexParams, use two ciphertexts
 
 	s.MaxMinIndexAssign(s.ctSign, s.ctSignNeg, s.ctTopIdx00, s.ctTopIdx10, s.ctTopIdx00, s.ctTopIdx10)
-
 	if idxExceedsBound {
 		s.MaxMinIndexAssign(s.ctSign, s.ctSignNeg, s.ctTopIdx01, s.ctTopIdx11, s.ctTopIdx01, s.ctTopIdx11)
 	}
