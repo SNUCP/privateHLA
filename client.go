@@ -3,6 +3,7 @@ package hla
 import (
 	"math"
 
+	"github.com/sp301415/tfhe-go/math/num"
 	"github.com/sp301415/tfhe-go/math/vec"
 	"github.com/sp301415/tfhe-go/tfhe"
 )
@@ -11,6 +12,8 @@ import (
 type Client struct {
 	// Parameters is the parameters for client.
 	Parameters tfhe.Parameters[uint64]
+	// IdxParameters is the parameters for indices.
+	IdxParameters tfhe.Parameters[uint64]
 	// Encryptor is the encryptor that encrypts the data.
 	Encryptor *tfhe.Encryptor[uint64]
 }
@@ -19,8 +22,9 @@ type Client struct {
 func NewClient() *Client {
 	params := FloatParamsLiteral.Compile()
 	return &Client{
-		Parameters: params,
-		Encryptor:  tfhe.NewEncryptor(params),
+		Parameters:    params,
+		IdxParameters: IntParamsLiteral.Compile(),
+		Encryptor:     tfhe.NewEncryptor(params),
 	}
 }
 
@@ -46,4 +50,24 @@ func (c *Client) EncryptSnips(id string) []tfhe.FourierGLWECiphertext[uint64] {
 	}
 
 	return ctSnip
+}
+
+func sigmoid(x float64) float64 {
+	return 1 / (1 + math.Exp(-x))
+}
+
+// DecryptResults decrypts the prediction results from the server.
+func (c *Client) DecryptResults(prefix string, res ServerResult) (string, string) {
+	idx00 := c.Encryptor.DecodeLWECustom(c.Encryptor.DecryptLWEPlaintext(res.Idx00), c.IdxParameters.MessageModulus(), c.IdxParameters.Scale())
+	idx01 := c.Encryptor.DecodeLWECustom(c.Encryptor.DecryptLWEPlaintext(res.Idx01), c.IdxParameters.MessageModulus(), c.IdxParameters.Scale())
+	idx10 := c.Encryptor.DecodeLWECustom(c.Encryptor.DecryptLWEPlaintext(res.Idx10), c.IdxParameters.MessageModulus(), c.IdxParameters.Scale())
+	idx11 := c.Encryptor.DecodeLWECustom(c.Encryptor.DecryptLWEPlaintext(res.Idx11), c.IdxParameters.MessageModulus(), c.IdxParameters.Scale())
+
+	idx0 := idx01<<(num.Log2(c.IdxParameters.MessageModulus())-1) + idx00
+	idx1 := idx11<<(num.Log2(c.IdxParameters.MessageModulus())-1) + idx10
+
+	allele0 := HLAData.Alleles[prefix][idx0]
+	allele1 := HLAData.Alleles[prefix][idx1]
+
+	return allele0, allele1
 }

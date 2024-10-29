@@ -32,11 +32,11 @@ var HLAData = struct {
 	Predictions map[string]map[string][2]string
 }{}
 
-func init() {
+func LoadHLA(dataset int) {
 	var err error
 
 	// Fill the HLAData with the data from the CSV files.
-	allelesFile, err := os.Open("data/alleles.csv")
+	allelesFile, err := os.Open(fmt.Sprintf("data/%v/weights/alleles.csv", dataset))
 	if err != nil {
 		panic(err)
 	}
@@ -62,7 +62,7 @@ func init() {
 	for allelePrefix, alleleNames := range HLAData.Alleles {
 		HLAData.Weights[allelePrefix] = make(map[string][]float64, 0)
 		for _, allele := range alleleNames {
-			weightFileName := fmt.Sprintf("data/w_%s*%s.csv", allelePrefix, allele)
+			weightFileName := fmt.Sprintf("data/%v/weights/w_%s_%s.csv", dataset, allelePrefix, allele)
 			weightFile, err := os.Open(weightFileName)
 			if err != nil {
 				panic(err)
@@ -96,7 +96,7 @@ func init() {
 		}
 	}
 
-	snipsFile, err := os.Open("data/X_val.csv")
+	snipsFile, err := os.Open(fmt.Sprintf("data/%v/X/X_test.csv", dataset))
 	if err != nil {
 		panic(err)
 	}
@@ -130,52 +130,52 @@ func init() {
 		}
 	}
 
-	HLAData.Predictions = make(map[string]map[string][2]string, 0)
-	for _, id := range HLAData.ID {
-		HLAData.Predictions[id] = make(map[string][2]string, 0)
-	}
+	// HLAData.Predictions = make(map[string]map[string][2]string, 0)
+	// for _, id := range HLAData.ID {
+	// 	HLAData.Predictions[id] = make(map[string][2]string, 0)
+	// }
 
-	for allelePrefix := range HLAData.Alleles {
-		predictionFileName := fmt.Sprintf("data/Y_val_%s.csv", allelePrefix)
-		predictionFile, err := os.Open(predictionFileName)
-		if err != nil {
-			panic(err)
-		}
+	// for allelePrefix := range HLAData.Alleles {
+	// 	predictionFileName := fmt.Sprintf("data/Y_val_%s.csv", allelePrefix)
+	// 	predictionFile, err := os.Open(predictionFileName)
+	// 	if err != nil {
+	// 		panic(err)
+	// 	}
 
-		predictionReader := csv.NewReader(bufio.NewReader(predictionFile))
+	// 	predictionReader := csv.NewReader(bufio.NewReader(predictionFile))
 
-		alleleRow, err := predictionReader.Read() // Skip the header
-		if err != nil {
-			panic(err)
-		}
-		alleles := strings.Split(alleleRow[0], "\t")[1:]
+	// 	alleleRow, err := predictionReader.Read() // Skip the header
+	// 	if err != nil {
+	// 		panic(err)
+	// 	}
+	// 	alleles := strings.Split(alleleRow[0], "\t")[1:]
 
-		for {
-			row, err := predictionReader.Read()
-			if err != nil {
-				if err == io.EOF {
-					break
-				}
-				panic(err)
-			}
+	// 	for {
+	// 		row, err := predictionReader.Read()
+	// 		if err != nil {
+	// 			if err == io.EOF {
+	// 				break
+	// 			}
+	// 			panic(err)
+	// 		}
 
-			rowSplit := strings.Split(row[0], "\t")
+	// 		rowSplit := strings.Split(row[0], "\t")
 
-			id := rowSplit[0]
-			ptr := 0
-			prediction := [2]string{}
-			for i, p := range rowSplit[1:] {
-				if p == "1" {
-					prediction[ptr] = alleles[i]
-					ptr++
-				} else if p == "2" {
-					prediction[0] = alleles[i]
-					prediction[1] = alleles[i]
-					break
-				}
-			}
+	// 		id := rowSplit[0]
+	// 		ptr := 0
+	// 		prediction := [2]string{}
+	// 		for i, p := range rowSplit[1:] {
+	// 			if p == "1" {
+	// 				prediction[ptr] = alleles[i]
+	// 				ptr++
+	// 			} else if p == "2" {
+	// 				prediction[0] = alleles[i]
+	// 				prediction[1] = alleles[i]
+	// 				break
+	// 			}
+	// 		}
 
-			HLAData.Predictions[id][allelePrefix] = prediction
-		}
-	}
+	// 		HLAData.Predictions[id][allelePrefix] = prediction
+	// 	}
+	// }
 }

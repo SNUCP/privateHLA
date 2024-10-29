@@ -11,7 +11,7 @@ var (
 	// It has much lower failure rate. (Around 2^-16).
 	FloatParamsLiteral = tfhe.ParametersLiteral[uint64]{
 		LWEDimension:    978,
-		GLWEDimension:   1,
+		GLWERank:        1,
 		PolyDegree:      2048,
 		LookUpTableSize: 4096,
 
@@ -38,7 +38,7 @@ var (
 	// This has standard failure rate, around 2^-60.
 	IntParamsLiteral = tfhe.ParametersLiteral[uint64]{
 		LWEDimension:    978,
-		GLWEDimension:   1,
+		GLWERank:        1,
 		PolyDegree:      2048,
 		LookUpTableSize: 2048,
 
@@ -75,8 +75,8 @@ var (
 
 	// NormalizeBound is a bound for "Normalizing" the predictions.
 	// We use a ReLU-like function.
-	NormalizeBound = -10.0
+	NormalizeBound = -13.0
 
 	// CompareThreshold is a threshold for comparing the predictions.
-	CompareThreshold = 7.0
+	CompareThreshold = 14.0
 )

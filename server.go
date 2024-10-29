@@ -33,6 +33,10 @@ type Server struct {
 
 	// NormalizeLUT is a LUT for normalizing the predictions.
 	NormalizeLUT tfhe.LookUpTable[uint64]
+	// UnNormalizeLUT is a LUT for unnormalizing the predictions.
+	UnNormalizeLUT tfhe.LookUpTable[uint64]
+	// UnNormalizeThresholdLUT is UnNormalizeLUT / CompareThreshold.
+	UnNormalizeThresholdLUT tfhe.LookUpTable[uint64]
 	// SignLUT is a LUT for computing the sign.
 	SignLUT tfhe.LookUpTable[uint64]
 	// MulLUT is a LUT for comparing the predictions.
@@ -52,6 +56,8 @@ type Server struct {
 
 	ctTop0      tfhe.LWECiphertext[uint64]
 	ctTop1      tfhe.LWECiphertext[uint64]
+	ctTop0Cmp   tfhe.LWECiphertext[uint64]
+	ctTop1Cmp   tfhe.LWECiphertext[uint64]
 	ctMaxMinA   tfhe.LWECiphertext[uint64]
 	ctMaxMinB   tfhe.LWECiphertext[uint64]
 	ctMaxMinAdd tfhe.LWECiphertext[uint64]
@@ -74,7 +80,7 @@ func NewServer(allelePrefix string, evk tfhe.EvaluationKey[uint64]) *Server {
 	params := FloatParamsLiteral.Compile()
 
 	indexParams := IntParamsLiteral.Compile()
-	signParams := IntParamsLiteral.WithMessageModulus(1 << 2).Compile()
+	signParams := IntParamsLiteral.WithMessageModulus(1 << 1).Compile()
 
 	evaluator := tfhe.NewEvaluator(params, evk)
 	indexEvaluator := tfhe.NewEvaluator(indexParams, evk)
@@ -86,15 +92,31 @@ func NewServer(allelePrefix string, evk tfhe.EvaluationKey[uint64]) *Server {
 
 	// Normalize:
 	// We use a ReLU-like function.
-	normalizeLUT := evaluator.GenLookUpTableFull(func(x int) uint64 {
-		// Currently input is mapped as [-PredictionBound, PredictionBound] -> [0, 2*PredictionBound] -> [0, MessageModulus].
+	normalizeLUT := evaluator.GenLookUpTable(func(x int) int {
+		// Currently input is mapped as [-PredictionBound, PredictionBound] -> [0, 2*PredictionBound] -> [0, MessageModulus/2].
 		f := float64(x) / float64(params.MessageModulus())
 		f = 2*PredictionBound*f - PredictionBound
-
 		if f < NormalizeBound {
 			return 0
 		}
-		return uint64(math.Round((f - NormalizeBound) / (PredictionBound - NormalizeBound) * (1 << 62)))
+		f = (f - NormalizeBound) / (PredictionBound - NormalizeBound)
+		return int(math.Round(f * float64(params.MessageModulus()/2)))
+	})
+
+	// Unnormalize:
+	// Inverse of normalizeLUT + sigmoid.
+	unNormalizeLUT := evaluator.GenLookUpTable(func(x int) int {
+		f := float64(2*x) / float64(params.MessageModulus())
+		f = NormalizeBound + (PredictionBound-NormalizeBound)*f
+		f = sigmoid(f)
+		return int(math.Round(f * float64(params.MessageModulus()/2)))
+	})
+
+	unNormalizeThresholdLUT := evaluator.GenLookUpTable(func(x int) int {
+		f := float64(2*x) / float64(params.MessageModulus())
+		f = NormalizeBound + (PredictionBound-NormalizeBound)*f
+		f = sigmoid(f) / CompareThreshold
+		return int(math.Round(f * float64(params.MessageModulus()/2)))
 	})
 
 	// Sign:
@@ -137,7 +159,7 @@ func NewServer(allelePrefix string, evk tfhe.EvaluationKey[uint64]) *Server {
 				pt.Coeffs[kk] = uint64(math.Round(weight[k] * ScaleWeight))
 			}
 
-			weights[i][j] = evaluator.FourierEvaluator.ToFourierPoly(pt)
+			weights[i][j] = evaluator.PolyEvaluator.ToFourierPoly(pt)
 		}
 	}
 
@@ -153,10 +175,12 @@ func NewServer(allelePrefix string, evk tfhe.EvaluationKey[uint64]) *Server {
 		IndexEvaluator: indexEvaluator,
 		SignEvaluator:  signEvaluator,
 
-		NormalizeLUT: normalizeLUT,
-		SignLUT:      signLUT,
-		MulLUT:       mulLUT,
-		MulIndexLUT:  mulIndexLUT,
+		NormalizeLUT:            normalizeLUT,
+		UnNormalizeLUT:          unNormalizeLUT,
+		UnNormalizeThresholdLUT: unNormalizeThresholdLUT,
+		SignLUT:                 signLUT,
+		MulLUT:                  mulLUT,
+		MulIndexLUT:             mulIndexLUT,
 
 		Weights: weights,
 
@@ -166,6 +190,8 @@ func NewServer(allelePrefix string, evk tfhe.EvaluationKey[uint64]) *Server {
 
 		ctTop0:      tfhe.NewLWECiphertext(params),
 		ctTop1:      tfhe.NewLWECiphertext(params),
+		ctTop0Cmp:   tfhe.NewLWECiphertext(params),
+		ctTop1Cmp:   tfhe.NewLWECiphertext(params),
 		ctMaxMinA:   tfhe.NewLWECiphertext(params),
 		ctMaxMinB:   tfhe.NewLWECiphertext(params),
 		ctMaxMinAdd: tfhe.NewLWECiphertext(params),
@@ -191,9 +217,6 @@ type ServerResult struct {
 
 	Idx10 tfhe.LWECiphertext[uint64]
 	Idx11 tfhe.LWECiphertext[uint64]
-
-	Top0 tfhe.LWECiphertext[uint64]
-	Top1 tfhe.LWECiphertext[uint64]
 }
 
 // Predict predicts the value of the given snips.
@@ -239,10 +262,6 @@ func (s *Server) Predict(snips []tfhe.FourierGLWECiphertext[uint64]) ServerResul
 	}
 	wg.Wait()
 
-	s.SignBitAssign(preds[0], preds[1], s.ctSign, s.ctSignNeg)
-
-	s.MaxMinAssign(s.ctSign, s.ctSignNeg, preds[0], preds[1], s.ctTop0, s.ctTop1)
-
 	// Trivial encryption of index.
 	s.ctTopIdx00.Clear()
 	s.ctTopIdx00.Value[0] = s.IndexEvaluator.EncodeLWE(0).Value
@@ -252,8 +271,10 @@ func (s *Server) Predict(snips []tfhe.FourierGLWECiphertext[uint64]) ServerResul
 	s.ctTopIdx10.Value[0] = s.IndexEvaluator.EncodeLWE(1).Value
 	s.ctTopIdx11.Clear()
 
-	idxExceedsBound := len(preds) > int(s.IndexParameters.MessageModulus()/2) // If index exceeds the bound for IndexParams, use two ciphertexts
+	idxExceedsBound := len(preds) > int(s.IndexParameters.MessageModulus()/2)
 
+	s.SignBitAssign(preds[0], preds[1], s.ctSign, s.ctSignNeg)
+	s.MaxMinAssign(s.ctSign, s.ctSignNeg, preds[0], preds[1], s.ctTop0, s.ctTop1)
 	s.MaxMinIndexAssign(s.ctSign, s.ctSignNeg, s.ctTopIdx00, s.ctTopIdx10, s.ctTopIdx00, s.ctTopIdx10)
 	if idxExceedsBound {
 		s.MaxMinIndexAssign(s.ctSign, s.ctSignNeg, s.ctTopIdx01, s.ctTopIdx11, s.ctTopIdx01, s.ctTopIdx11)
@@ -261,9 +282,9 @@ func (s *Server) Predict(snips []tfhe.FourierGLWECiphertext[uint64]) ServerResul
 
 	for i := 2; i < len(preds); i++ {
 		s.ctIdx0.Clear()
-		s.ctIdx0.Value[0] = s.IndexEvaluator.EncodeLWE(i % 16).Value
+		s.ctIdx0.Value[0] = s.IndexEvaluator.EncodeLWE(i % (int(s.IndexParameters.MessageModulus()) / 2)).Value
 		s.ctIdx1.Clear()
-		s.ctIdx1.Value[0] = s.IndexEvaluator.EncodeLWE(i / 16).Value
+		s.ctIdx1.Value[0] = s.IndexEvaluator.EncodeLWE(i / (int(s.IndexParameters.MessageModulus()) / 2)).Value
 
 		s.SignBitAssign(preds[i], s.ctTop0, s.ctSign, s.ctSignNeg)
 
@@ -282,15 +303,24 @@ func (s *Server) Predict(snips []tfhe.FourierGLWECiphertext[uint64]) ServerResul
 		}
 	}
 
+	// Since CompareThreshold * top0 > top0 > top1,
+	// we only compare CompareThreshold * top1 and top0.
+	// or, equivalently, top1 and top0 / CompareThreshold.
+	s.Evaluator.BootstrapLUTAssign(s.ctTop0, s.UnNormalizeThresholdLUT, s.ctTop0Cmp)
+	s.Evaluator.BootstrapLUTAssign(s.ctTop1, s.UnNormalizeLUT, s.ctTop1)
+
+	s.SignBitAssign(s.ctTop1, s.ctTop0Cmp, s.ctSign, s.ctSignNeg)
+	s.MaxMinIndexAssign(s.ctSign, s.ctSignNeg, s.ctTopIdx10, s.ctTopIdx00, s.ctTopIdx10, s.ctBuffResult)
+	if idxExceedsBound {
+		s.MaxMinIndexAssign(s.ctSign, s.ctSignNeg, s.ctTopIdx11, s.ctTopIdx01, s.ctTopIdx11, s.ctBuffResult)
+	}
+
 	return ServerResult{
 		Idx00: s.ctTopIdx00.Copy(),
 		Idx01: s.ctTopIdx01.Copy(),
 
 		Idx10: s.ctTopIdx10.Copy(),
 		Idx11: s.ctTopIdx11.Copy(),
-
-		Top0: s.ctTop0.Copy(),
-		Top1: s.ctTop1.Copy(),
 	}
 }
 
