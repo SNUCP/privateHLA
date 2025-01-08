@@ -11,8 +11,7 @@ import (
 
 // Server is a struct for predicting each allele prefix.
 type Server struct {
-	AllelePrefix string
-
+	// Only for debugging purposes.
 	Encryptor *tfhe.Encryptor[uint64]
 
 	// Parameters is a "default" parameter for floating-point operations.
@@ -76,7 +75,7 @@ type Server struct {
 }
 
 // NewServer creates a new ServerComponent.
-func NewServer(allelePrefix string, evk tfhe.EvaluationKey[uint64]) *Server {
+func NewServer(data HLAData, evk tfhe.EvaluationKey[uint64]) *Server {
 	params := FloatParamsLiteral.Compile()
 
 	indexParams := IntParamsLiteral.Compile()
@@ -85,7 +84,7 @@ func NewServer(allelePrefix string, evk tfhe.EvaluationKey[uint64]) *Server {
 	evaluator := tfhe.NewEvaluator(params, evk)
 	indexEvaluator := tfhe.NewEvaluator(indexParams, evk)
 	signEvaluator := tfhe.NewEvaluator(signParams, evk)
-	evPool := make([]*tfhe.Evaluator[uint64], num.Sqrt(len(HLAData.Alleles[allelePrefix])))
+	evPool := make([]*tfhe.Evaluator[uint64], num.Sqrt(len(data.Alleles)))
 	for i := range evPool {
 		evPool[i] = evaluator.ShallowCopy()
 	}
@@ -145,9 +144,9 @@ func NewServer(allelePrefix string, evk tfhe.EvaluationKey[uint64]) *Server {
 	})
 
 	// Encode Weights
-	weights := make([][]poly.FourierPoly, len(HLAData.Alleles[allelePrefix]))
-	for i, allele := range HLAData.Alleles[allelePrefix] {
-		weight := HLAData.Weights[allelePrefix][allele]
+	weights := make([][]poly.FourierPoly, len(data.Alleles))
+	for i, allele := range data.Alleles {
+		weight := data.Weights[allele]
 		chunkCount := int(math.Round(float64(len(weight)) / float64(params.PolyDegree())))
 		weights[i] = make([]poly.FourierPoly, chunkCount)
 		for j := range chunkCount {
@@ -164,8 +163,6 @@ func NewServer(allelePrefix string, evk tfhe.EvaluationKey[uint64]) *Server {
 	}
 
 	return &Server{
-		AllelePrefix: allelePrefix,
-
 		Parameters:      params,
 		IndexParameters: indexParams,
 		SignParameters:  signParams,
@@ -219,8 +216,25 @@ type ServerResult struct {
 	Idx11 tfhe.LWECiphertext[uint64]
 }
 
-// Predict predicts the value of the given snips.
-func (s *Server) Predict(snips []tfhe.FourierGLWECiphertext[uint64]) ServerResult {
+type LinearResult struct {
+	Preds []tfhe.LWECiphertext[uint64]
+}
+
+type Top2Result struct {
+	Top0 tfhe.LWECiphertext[uint64]
+	Top1 tfhe.LWECiphertext[uint64]
+
+	TopIdx00 tfhe.LWECiphertext[uint64]
+	TopIdx01 tfhe.LWECiphertext[uint64]
+
+	TopIdx10 tfhe.LWECiphertext[uint64]
+	TopIdx11 tfhe.LWECiphertext[uint64]
+
+	IdxExceedsBound bool
+}
+
+// Linear executes the linear part of the prediction.
+func (s *Server) Linear(snips []tfhe.FourierGLWECiphertext[uint64]) LinearResult {
 	// First step: Inner Product between weights and the snips.
 	preds := make([]tfhe.LWECiphertext[uint64], len(s.Weights))
 	for i := range s.Weights {
@@ -261,6 +275,15 @@ func (s *Server) Predict(snips []tfhe.FourierGLWECiphertext[uint64]) ServerResul
 		}(i)
 	}
 	wg.Wait()
+
+	return LinearResult{
+		Preds: preds,
+	}
+}
+
+// Top2 executes the top2 part of the prediction.
+func (s *Server) Top2(linearResult LinearResult) Top2Result {
+	preds := linearResult.Preds
 
 	// Trivial encryption of index.
 	s.ctTopIdx00.Clear()
@@ -303,25 +326,60 @@ func (s *Server) Predict(snips []tfhe.FourierGLWECiphertext[uint64]) ServerResul
 		}
 	}
 
+	return Top2Result{
+		Top0: s.ctTop0.Copy(),
+		Top1: s.ctTop1.Copy(),
+
+		TopIdx00: s.ctTopIdx00.Copy(),
+		TopIdx01: s.ctTopIdx01.Copy(),
+
+		TopIdx10: s.ctTopIdx10.Copy(),
+		TopIdx11: s.ctTopIdx11.Copy(),
+
+		IdxExceedsBound: idxExceedsBound,
+	}
+}
+
+// Threshold executes the threshold part of the prediction.
+func (s *Server) Threshold(top2Result Top2Result) ServerResult {
+	ctTop0 := top2Result.Top0
+	ctTop1 := top2Result.Top1
+
+	ctTopIdx00 := top2Result.TopIdx00
+	ctTopIdx01 := top2Result.TopIdx01
+
+	ctTopIdx10 := top2Result.TopIdx10
+	ctTopIdx11 := top2Result.TopIdx11
+
+	idxExceedsBound := top2Result.IdxExceedsBound
+
 	// Since CompareThreshold * top0 > top0 > top1,
 	// we only compare CompareThreshold * top1 and top0.
 	// or, equivalently, top1 and top0 / CompareThreshold.
-	s.Evaluator.BootstrapLUTAssign(s.ctTop0, s.UnNormalizeThresholdLUT, s.ctTop0Cmp)
-	s.Evaluator.BootstrapLUTAssign(s.ctTop1, s.UnNormalizeLUT, s.ctTop1)
+	s.Evaluator.BootstrapLUTAssign(ctTop0, s.UnNormalizeThresholdLUT, s.ctTop0Cmp)
+	s.Evaluator.BootstrapLUTAssign(ctTop1, s.UnNormalizeLUT, s.ctTop1Cmp)
 
-	s.SignBitAssign(s.ctTop1, s.ctTop0Cmp, s.ctSign, s.ctSignNeg)
-	s.MaxMinIndexAssign(s.ctSign, s.ctSignNeg, s.ctTopIdx10, s.ctTopIdx00, s.ctTopIdx10, s.ctBuffResult)
+	s.SignBitAssign(s.ctTop1Cmp, s.ctTop0Cmp, s.ctSign, s.ctSignNeg)
+	s.MaxMinIndexAssign(s.ctSign, s.ctSignNeg, ctTopIdx10, ctTopIdx00, ctTopIdx10, s.ctBuffResult)
+
 	if idxExceedsBound {
-		s.MaxMinIndexAssign(s.ctSign, s.ctSignNeg, s.ctTopIdx11, s.ctTopIdx01, s.ctTopIdx11, s.ctBuffResult)
+		s.MaxMinIndexAssign(s.ctSign, s.ctSignNeg, ctTopIdx11, ctTopIdx01, ctTopIdx11, s.ctBuffResult)
 	}
 
 	return ServerResult{
-		Idx00: s.ctTopIdx00.Copy(),
-		Idx01: s.ctTopIdx01.Copy(),
+		Idx00: ctTopIdx00.Copy(),
+		Idx01: ctTopIdx01.Copy(),
 
-		Idx10: s.ctTopIdx10.Copy(),
-		Idx11: s.ctTopIdx11.Copy(),
+		Idx10: ctTopIdx10.Copy(),
+		Idx11: ctTopIdx11.Copy(),
 	}
+}
+
+// Predict predicts the value of the given snips.
+func (s *Server) Predict(snips []tfhe.FourierGLWECiphertext[uint64]) ServerResult {
+	linearResult := s.Linear(snips)
+	top2Result := s.Top2(linearResult)
+	return s.Threshold(top2Result)
 }
 
 // SignBitAssign returns 2^(p-1) if ct0 > ct1, and 0 otherwise.

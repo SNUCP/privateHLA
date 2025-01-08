@@ -3,7 +3,6 @@ package hla
 import (
 	"math"
 
-	"github.com/sp301415/tfhe-go/math/num"
 	"github.com/sp301415/tfhe-go/math/vec"
 	"github.com/sp301415/tfhe-go/tfhe"
 )
@@ -16,15 +15,19 @@ type Client struct {
 	IdxParameters tfhe.Parameters[uint64]
 	// Encryptor is the encryptor that encrypts the data.
 	Encryptor *tfhe.Encryptor[uint64]
+
+	// Data is the HLA data.
+	Data HLAData
 }
 
 // NewClient creates a new client.
-func NewClient() *Client {
+func NewClient(data HLAData) *Client {
 	params := FloatParamsLiteral.Compile()
 	return &Client{
 		Parameters:    params,
 		IdxParameters: IntParamsLiteral.Compile(),
 		Encryptor:     tfhe.NewEncryptor(params),
+		Data:          data,
 	}
 }
 
@@ -32,7 +35,7 @@ func NewClient() *Client {
 // Since the number of snips exceed the polynomial degree,
 // we split the snips into multiple ciphertexts.
 func (c *Client) EncryptSnips(id string) []tfhe.FourierGLWECiphertext[uint64] {
-	snip := HLAData.Snips[id]
+	snip := c.Data.Snips[id]
 
 	chunkCount := int(math.Round(float64(len(snip)) / float64(c.Parameters.PolyDegree())))
 	ctSnip := make([]tfhe.FourierGLWECiphertext[uint64], chunkCount)
@@ -63,11 +66,17 @@ func (c *Client) DecryptResults(prefix string, res ServerResult) (string, string
 	idx10 := c.Encryptor.DecodeLWECustom(c.Encryptor.DecryptLWEPlaintext(res.Idx10), c.IdxParameters.MessageModulus(), c.IdxParameters.Scale())
 	idx11 := c.Encryptor.DecodeLWECustom(c.Encryptor.DecryptLWEPlaintext(res.Idx11), c.IdxParameters.MessageModulus(), c.IdxParameters.Scale())
 
-	idx0 := idx01<<(num.Log2(c.IdxParameters.MessageModulus())-1) + idx00
-	idx1 := idx11<<(num.Log2(c.IdxParameters.MessageModulus())-1) + idx10
+	idx0 := idx01*int(c.IdxParameters.MessageModulus()/2) + idx00
+	idx1 := idx11*int(c.IdxParameters.MessageModulus()/2) + idx10
 
-	allele0 := HLAData.Alleles[prefix][idx0]
-	allele1 := HLAData.Alleles[prefix][idx1]
+	if idx0 > len(c.Data.Alleles) || idx1 > len(c.Data.Alleles) {
+		// This should not happen, but if it did the result is wrong.
+		// Just output the first allele.
+		return c.Data.Alleles[0], c.Data.Alleles[0]
+	}
+
+	allele0 := c.Data.Alleles[idx0]
+	allele1 := c.Data.Alleles[idx1]
 
 	return allele0, allele1
 }

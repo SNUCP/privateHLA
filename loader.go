@@ -1,113 +1,109 @@
 package hla
 
 import (
-	"bufio"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
 
-// HLAData is a singleton variable for all the data for HLA prediction.
-var HLAData = struct {
+// HLAData stores all the data for HLA prediction for specific dataset and allele prefix.
+type HLAData struct {
 	// Alleles is a list of all the alleles.
-	//
-	// AllelePrefix: []AlleleName
-	Alleles map[string][]string
+	Alleles []string
+
 	// ID is a list of all the IDs.
 	ID []string
+
 	// Weights is a weight for each alleles (W).
 	//
-	// AllelePrefix: AlleleName: []Weight
-	Weights map[string]map[string][]float64
+	// AlleleName: []Weight
+	Weights map[string][]float64
+
 	// Snips is a list of all the snips for each ID (X).
 	//
 	// ID: []Snip
 	Snips map[string][]float64
-	// Predictions is a list of all the predictions for each ID (Raw data of Y).
-	//
-	// ID: AllelePrefix: Predictions
-	Predictions map[string]map[string][2]string
-}{}
+}
 
-func LoadHLA(dataset int) {
+// LoadHLA loads the HLA data for the given dataset and allele prefix.
+func LoadHLA(dataset, prefix string) (HLAData, error) {
 	var err error
 
-	// Fill the HLAData with the data from the CSV files.
-	allelesFile, err := os.Open(fmt.Sprintf("data/%v/weights/alleles.csv", dataset))
+	data := HLAData{
+		Alleles: make([]string, 0),
+		ID:      make([]string, 0),
+		Weights: make(map[string][]float64, 0),
+		Snips:   make(map[string][]float64, 0),
+	}
+
+	filePath := fmt.Sprintf("data/%v/weights", dataset)
+	fileNames, err := os.ReadDir(filePath)
 	if err != nil {
-		panic(err)
+		return HLAData{}, err
 	}
-	defer allelesFile.Close()
 
-	HLAData.Alleles = make(map[string][]string, 0)
-	allelesReader := csv.NewReader(bufio.NewReader(allelesFile))
+	for _, file := range fileNames {
+		name := strings.TrimSuffix(file.Name(), filepath.Ext(file.Name()))
+		nameSplit := strings.Split(name, "*")
+		if nameSplit[0] == prefix {
+			data.Alleles = append(data.Alleles, nameSplit[1])
+		}
+	}
 
-	for {
-		row, err := allelesReader.Read()
+	if len(data.Alleles) == 0 {
+		return HLAData{}, errors.New("no alleles found")
+	}
+
+	for _, allele := range data.Alleles {
+		weightFileName := fmt.Sprintf("data/%v/weights/%v*%v.csv", dataset, prefix, allele)
+		weightFile, err := os.Open(weightFileName)
 		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			panic(err)
+			return HLAData{}, err
 		}
-		alleleCut := strings.Split(row[0], "*")
+		defer weightFile.Close()
 
-		HLAData.Alleles[alleleCut[0]] = append(HLAData.Alleles[alleleCut[0]], alleleCut[1])
-	}
+		weightReader := csv.NewReader(weightFile)
 
-	HLAData.Weights = make(map[string]map[string][]float64, 0)
-	for allelePrefix, alleleNames := range HLAData.Alleles {
-		HLAData.Weights[allelePrefix] = make(map[string][]float64, 0)
-		for _, allele := range alleleNames {
-			weightFileName := fmt.Sprintf("data/%v/weights/w_%s_%s.csv", dataset, allelePrefix, allele)
-			weightFile, err := os.Open(weightFileName)
-			if err != nil {
-				panic(err)
-			}
-
-			weight := make([]float64, 0)
-			weightReader := csv.NewReader(bufio.NewReader(weightFile))
-
-			_, err = weightReader.Read() // Skip the header
-			if err != nil {
-				panic(err)
-			}
-
-			for {
-				row, err := weightReader.Read()
-				if err != nil {
-					if err == io.EOF {
-						break
-					}
-					panic(err)
-				}
-				w, err := strconv.ParseFloat(row[0], 64)
-				if err != nil {
-					panic(err)
-				}
-
-				weight = append(weight, w)
-			}
-
-			HLAData.Weights[allelePrefix][allele] = weight
+		_, err = weightReader.Read() // Skip the header
+		if err != nil {
+			return HLAData{}, err
 		}
+
+		weight := make([]float64, 0)
+		for {
+			row, err := weightReader.Read()
+			if err != nil {
+				if err == io.EOF {
+					break
+				}
+				return HLAData{}, err
+			}
+			w, err := strconv.ParseFloat(row[0], 64)
+			if err != nil {
+				return HLAData{}, err
+			}
+
+			weight = append(weight, w)
+		}
+		data.Weights[allele] = weight
 	}
 
 	snipsFile, err := os.Open(fmt.Sprintf("data/%v/X/X_test.csv", dataset))
 	if err != nil {
-		panic(err)
+		return HLAData{}, err
 	}
+	defer snipsFile.Close()
 
-	HLAData.ID = make([]string, 0)
-	HLAData.Snips = make(map[string][]float64)
-	snipsReader := csv.NewReader(bufio.NewReader(snipsFile))
+	snipsReader := csv.NewReader(snipsFile)
 
 	_, err = snipsReader.Read() // Skip the header
 	if err != nil {
-		panic(err)
+		return HLAData{}, err
 	}
 
 	for {
@@ -116,66 +112,23 @@ func LoadHLA(dataset int) {
 			if err == io.EOF {
 				break
 			}
-			panic(err)
+			return HLAData{}, err
 		}
 
 		rowSplit := strings.Split(row[0], "\t")
 
-		HLAData.ID = append(HLAData.ID, rowSplit[0])
-		HLAData.Snips[rowSplit[0]] = make([]float64, 1)
-		HLAData.Snips[rowSplit[0]][0] = 1 // Bias term
+		data.ID = append(data.ID, rowSplit[0])
+		data.Snips[rowSplit[0]] = make([]float64, 1)
+		data.Snips[rowSplit[0]][0] = 1 // Bias term
 		for _, snip := range rowSplit[1:] {
-			s, _ := strconv.ParseFloat(snip, 64)
-			HLAData.Snips[rowSplit[0]] = append(HLAData.Snips[rowSplit[0]], s)
+			s, err := strconv.ParseFloat(snip, 64)
+			if err != nil {
+				return HLAData{}, err
+			}
+			data.Snips[rowSplit[0]] = append(data.Snips[rowSplit[0]], s)
 		}
+
 	}
 
-	// HLAData.Predictions = make(map[string]map[string][2]string, 0)
-	// for _, id := range HLAData.ID {
-	// 	HLAData.Predictions[id] = make(map[string][2]string, 0)
-	// }
-
-	// for allelePrefix := range HLAData.Alleles {
-	// 	predictionFileName := fmt.Sprintf("data/Y_val_%s.csv", allelePrefix)
-	// 	predictionFile, err := os.Open(predictionFileName)
-	// 	if err != nil {
-	// 		panic(err)
-	// 	}
-
-	// 	predictionReader := csv.NewReader(bufio.NewReader(predictionFile))
-
-	// 	alleleRow, err := predictionReader.Read() // Skip the header
-	// 	if err != nil {
-	// 		panic(err)
-	// 	}
-	// 	alleles := strings.Split(alleleRow[0], "\t")[1:]
-
-	// 	for {
-	// 		row, err := predictionReader.Read()
-	// 		if err != nil {
-	// 			if err == io.EOF {
-	// 				break
-	// 			}
-	// 			panic(err)
-	// 		}
-
-	// 		rowSplit := strings.Split(row[0], "\t")
-
-	// 		id := rowSplit[0]
-	// 		ptr := 0
-	// 		prediction := [2]string{}
-	// 		for i, p := range rowSplit[1:] {
-	// 			if p == "1" {
-	// 				prediction[ptr] = alleles[i]
-	// 				ptr++
-	// 			} else if p == "2" {
-	// 				prediction[0] = alleles[i]
-	// 				prediction[1] = alleles[i]
-	// 				break
-	// 			}
-	// 		}
-
-	// 		HLAData.Predictions[id][allelePrefix] = prediction
-	// 	}
-	// }
+	return data, nil
 }

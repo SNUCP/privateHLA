@@ -78,5 +78,5 @@ var (
 	NormalizeBound = -13.0
 
 	// CompareThreshold is a threshold for comparing the predictions.
-	CompareThreshold = 14.0
+	CompareThreshold = 15.0
 )
