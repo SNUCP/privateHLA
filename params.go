@@ -8,7 +8,7 @@ import (
 
 var (
 	// FloatParamsLiteral is the parameters for floating-point operations.
-	// It has much lower failure rate. (Around 2^-16).
+	// It has much lower failure rate, around 2^-16.
 	FloatParamsLiteral = tfhe.ParametersLiteral[uint64]{
 		LWEDimension:    978,
 		GLWERank:        1,
@@ -22,7 +22,7 @@ var (
 
 		MessageModulus: 1 << 7,
 
-		BootstrapParameters: tfhe.GadgetParametersLiteral[uint64]{
+		BlindRotateParameters: tfhe.GadgetParametersLiteral[uint64]{
 			Base:  1 << 22,
 			Level: 1,
 		},
@@ -35,7 +35,7 @@ var (
 	}
 
 	// IntParamsLiteral is the parameters for integer operations.
-	// This has standard failure rate, around 2^-60.
+	// This has standard failure rate, around 2^-64.
 	IntParamsLiteral = tfhe.ParametersLiteral[uint64]{
 		LWEDimension:    978,
 		GLWERank:        1,
@@ -49,7 +49,7 @@ var (
 
 		MessageModulus: 1 << 5,
 
-		BootstrapParameters: tfhe.GadgetParametersLiteral[uint64]{
+		BlindRotateParameters: tfhe.GadgetParametersLiteral[uint64]{
 			Base:  1 << 22,
 			Level: 1,
 		},

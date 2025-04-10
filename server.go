@@ -235,7 +235,6 @@ type Top2Result struct {
 
 // Linear executes the linear part of the prediction.
 func (s *Server) Linear(snips []tfhe.FourierGLWECiphertext[uint64]) LinearResult {
-	// First step: Inner Product between weights and the snips.
 	preds := make([]tfhe.LWECiphertext[uint64], len(s.Weights))
 	for i := range s.Weights {
 		if len(s.Weights[i]) != len(snips) {
@@ -250,8 +249,18 @@ func (s *Server) Linear(snips []tfhe.FourierGLWECiphertext[uint64]) LinearResult
 		preds[i] = (s.Evaluator.ToGLWECiphertext(ctProd).ToLWECiphertext(s.Parameters.PolyDegree() - 1))
 	}
 
-	// Second step: Normalize the predictions.
-	// We do this in parallel, as it is embarrassingly parallel.
+	return LinearResult{
+		Preds: preds,
+	}
+}
+
+// Top2 executes the top2 part of the prediction.
+func (s *Server) Top2(linearResult LinearResult) Top2Result {
+	preds := make([]tfhe.LWECiphertext[uint64], len(linearResult.Preds))
+	for i := range linearResult.Preds {
+		preds[i] = linearResult.Preds[i].Copy()
+	}
+
 	normalizeIdxChan := make(chan int)
 	go func() {
 		for i := range preds {
@@ -275,15 +284,6 @@ func (s *Server) Linear(snips []tfhe.FourierGLWECiphertext[uint64]) LinearResult
 		}(i)
 	}
 	wg.Wait()
-
-	return LinearResult{
-		Preds: preds,
-	}
-}
-
-// Top2 executes the top2 part of the prediction.
-func (s *Server) Top2(linearResult LinearResult) Top2Result {
-	preds := linearResult.Preds
 
 	// Trivial encryption of index.
 	s.ctTopIdx00.Clear()

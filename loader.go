@@ -41,7 +41,7 @@ func LoadHLA(dataset, prefix string) (HLAData, error) {
 		Snips:   make(map[string][]float64, 0),
 	}
 
-	filePath := fmt.Sprintf("data/%v/weights", dataset)
+	filePath := fmt.Sprintf("data_public/%v/weights", dataset)
 	fileNames, err := os.ReadDir(filePath)
 	if err != nil {
 		return HLAData{}, err
@@ -60,7 +60,7 @@ func LoadHLA(dataset, prefix string) (HLAData, error) {
 	}
 
 	for _, allele := range data.Alleles {
-		weightFileName := fmt.Sprintf("data/%v/weights/%v*%v.csv", dataset, prefix, allele)
+		weightFileName := fmt.Sprintf("data_public/%v/weights/%v*%v.csv", dataset, prefix, allele)
 		weightFile, err := os.Open(weightFileName)
 		if err != nil {
 			return HLAData{}, err
@@ -93,7 +93,7 @@ func LoadHLA(dataset, prefix string) (HLAData, error) {
 		data.Weights[allele] = weight
 	}
 
-	snipsFile, err := os.Open(fmt.Sprintf("data/%v/X/X_test.csv", dataset))
+	snipsFile, err := os.Open(fmt.Sprintf("data_public/%v/X/X_test.csv", dataset))
 	if err != nil {
 		return HLAData{}, err
 	}
