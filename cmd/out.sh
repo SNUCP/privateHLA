@@ -8,6 +8,6 @@ do
     echo "" > ./out/"$dataset".out
     for prefix in "${prefixes[@]}"
     do
-        taskset -c 40-48 go run cmd/main.go -prefix="$prefix" -dataset="$dataset" >> "./out/$dataset.out"
+        go run cmd/main.go -prefix="$prefix" -dataset="$dataset" >> "./out/$dataset.out"
     done
 done
