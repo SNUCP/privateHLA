@@ -21,8 +21,16 @@ Finally, clone this repository and run `cmd/main.go` as follows.
 ```
 go run cmd/main.go -dataset="HapMap_EUR" -prefix="A"
 ```
+The `main.go` file executes the main components of `privateHLA`, including:
+
+- Encryption and decryption
+- Evaluation of the following functions:
+  - Linear
+  - Top2
+  - Sigmoid
+  - Thresholding
+
 Currently `dataset` flag accepts `HapMap_EUR, Korean`, and `prefix` flag accepts `A, B, C, DPA1, DPB1, DQA1, DQB1, DRB1`.
-Dataset are pulled from `data_public` folder, which contains nine example dataset.
 To automatically run all dataset and prefix, run `out.sh`.
 ```
 sh cmd/out.sh
@@ -31,5 +39,24 @@ Benchmarks using Go benchmark is also available. Run
 ```
 go test . -run=^$ -bench=.
 ```
-For more information, we recommend reading the code.
-The client-side code is under `client.go`, and the server-side code is under `server.go`.
+
+### Dataset Structure
+This repository also provides toy example datasets, each consisting of 9 individuals from the HapMap and Korean populations.
+Input data must be placed inside the specified dataset folder (e.g., `HapMap_EUR`).
+Both the genotype and the corresponding weights folders must be included in the same folder.
+
+Example:
+```
+├── HapMap_EUR/
+│   ├── X/
+│   ├── weights/
+```
+
+### Output to File
+To execute and save the output to a text file, run:
+
+```bash
+go run cmd/main.go -dataset="HapMap_EUR" -prefix="A" > output.txt
+```
+
+This will process the dataset located in the `HapMap_EUR` folder, using the target allele prefix `"A"`, and save the output to `output.txt`.
