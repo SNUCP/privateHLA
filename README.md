@@ -6,7 +6,7 @@ In recent years, several HLA imputation methods on local servers have been devel
 
 ## Installation
 
-This repository contains Go code for privateHLA. One can run it as any other Go program.
+This repository contains Go code for privateHLA. One can run it as any other Go program in all platforms supported by Go runtime, including Windows, macOS and Linux on x86 and ARM.
 
 First, install Go, following the official [instruction](https://go.dev/doc/install).
 
@@ -21,7 +21,9 @@ Finally, clone this repository and run `cmd/main.go` as follows.
 ```
 go run cmd/main.go -dataset="HapMap_EUR" -prefix="A"
 ```
-Currently `dataset` flag accepts `HapMap_EUR, Korean`, and `prefix` flag accepts `A, B, C, DPA1, DPB1, DQA1, DQB1, DRB1`. To automatically run all dataset and prefix, run `out.sh`.
+Currently `dataset` flag accepts `HapMap_EUR, Korean`, and `prefix` flag accepts `A, B, C, DPA1, DPB1, DQA1, DQB1, DRB1`.
+Dataset are pulled from `data_public` folder, which contains nine example dataset.
+To automatically run all dataset and prefix, run `out.sh`.
 ```
 sh cmd/out.sh
 ```
@@ -29,3 +31,5 @@ Benchmarks using Go benchmark is also available. Run
 ```
 go test . -run=^$ -bench=.
 ```
+For more information, we recommend reading the code.
+The client-side code is under `client.go`, and the server-side code is under `server.go`.
